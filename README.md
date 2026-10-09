@@ -1,10 +1,13 @@
 # ESP32 PS5 → PPM
 
-Turns a PS5 DualSense controller into an RC transmitter. An original ESP32 pairs with the controller over Bluetooth (via [Bluepad32](https://github.com/ricardoquesada/bluepad32)) and outputs PPM to an RC transmitter module.
+Turns a PS5 DualSense controller into an RC transmitter. An original ESP32 pairs with the controller over Bluetooth (via [Bluepad32](https://github.com/ricardoquesada/bluepad32)) and outputs PPM on two pins at once:
 
 ```
-DualSense ──Bluetooth──► ESP32 ──PPM (GPIO25)──► 900 MHz TX module ──RF──► receiver ──► servos / ESC
+DualSense ──Bluetooth──► ESP32 ─┬─PPM (GPIO25)──► 900 MHz TX module ──RF──► receiver ──► servos / ESC
+                                └─PPM (GPIO26)──► radio trainer jack (e.g. RadioMaster TX16S)
 ```
+
+![PS5 controller map](docs/controller-map.png)
 
 ## Hardware
 
@@ -24,7 +27,25 @@ DualSense ──Bluetooth──► ESP32 ──PPM (GPIO25)──► 900 MHz TX 
 
 Don't power the module from 3V3. That's below its 3.5 V minimum.
 
-Optional diagnostics: connect **GPIO26** to GPIO25 (loopback) or to a receiver's output to decode PPM. A 5 V receiver output needs a 1–2.2 kΩ series resistor.
+### Trainer port (RadioMaster TX16S)
+
+| 3.5 mm plug | ESP32 |
+|---|---|
+| Tip | **GPIO26** (PPM) |
+| Sleeve | GND |
+
+Check the jack pinout in your radio's manual before plugging in. Power the ESP32 separately (for example from a USB power bank), because the trainer jack doesn't supply power.
+
+EdgeTX setup:
+1. **Model → Trainer mode: Master/Jack.**
+2. **Radio → Trainer:** map TR1–TR4 to the sticks. The output sends TR1 = rudder, TR2 = elevator, TR3 = throttle, TR4 = rudder.
+3. Assign a **Special Function: Trainer** to a switch (momentary, latching or ON).
+
+The trainer output only sends while the PS5 is connected (or a serial test mode is on). If the controller drops out, GPIO26 goes quiet, EdgeTX reports **trainer signal lost**, and the radio's own sticks take over. The GPIO25 output keeps running with its failsafe values.
+
+### Diagnostics input
+
+Connect **GPIO27** to GPIO25 or GPIO26 (loopback), or to a receiver's output, to decode PPM. A 5 V receiver output needs a 1–2.2 kΩ series resistor.
 
 ## Controls
 
@@ -40,12 +61,18 @@ Optional diagnostics: connect **GPIO26** to GPIO25 (loopback) or to a receiver's
 |---|---|
 | Square | Toggle rudder reverse |
 | Triangle | Toggle elevator reverse |
+| Circle | Toggle rudder + elevator travel 100% (1000–2000 µs) ↔ 125% (875–2125 µs) |
+| L1 | **Launch hold:** full up elevator (same as right stick fully back) |
+| L2 | Release launch hold (moving the right stick up/down past ~40% also releases it) |
+| R1 / R2 | Elevator trim down / up. Hold to repeat, press both to reset |
 
-Reverse settings are saved to flash. The light bar shows the current state: **green** = normal, **blue** = rudder reversed, **yellow** = elevator reversed, **red** = both reversed. Each toggle gives a short rumble.
+Reverse settings are saved to flash. The light bar shows the current state: **green** = normal, **blue** = rudder reversed, **yellow** = elevator reversed, **red** = both reversed. Travel is shown on the player LEDs: **1 LED** = 100%, **all 5** = 125%. Each toggle gives a short rumble; switching to 125% gives a longer one.
+
+Launch hold gives a long strong rumble when it engages and is always cleared if the controller disconnects. Trim steps are about 8 µs (±128 µs max). Each step gives a tiny rumble, passing through centre a longer one, and hitting the limit a one-sided buzz. Trim is saved to flash.
 
 The ESP32's built-in LED (GPIO2) blinks while either stick is off-centre.
 
-**Failsafe:** if the controller disconnects, throttle goes to idle (1000 µs) and the other channels centre. PPM output keeps running.
+**Failsafe:** if the controller disconnects, GPIO25 sends throttle idle (1000 µs) with the other channels centred, and keeps running. GPIO26 (trainer) stops sending.
 
 ## PPM signal
 
@@ -71,7 +98,8 @@ Hold **PS + Create** until the light bar double-flashes. After the first pairing
 
 | Key | Action |
 |---|---|
-| `p` | Flip PPM polarity |
+| `p` | Flip TX module (GPIO25) polarity |
+| `P` | Flip trainer (GPIO26) polarity |
 | `s` | Separator 300 / 400 µs |
 | `t` | Test sweep on CH1–4 (**remove the prop**) |
 | `k` | Fixed pattern: 1100, 1300, 1500, 1700, 1900, 1500… |
@@ -85,7 +113,7 @@ python3 esp_cmd.py k 3
 
 ## Configuration
 
-Constants at the top of `esp32_ps5_ppm.ino`: pins, frame timing, default polarity, deadzone, `THROTTLE_FROM_CENTRE` (set to false for full-travel throttle), and `REVERSE_THROTTLE`.
+Constants at the top of `esp32_ps5_ppm.ino`: pins, frame timing, default polarity, deadzone, `THROTTLE_FROM_CENTRE` (set to false for full-travel throttle), `REVERSE_THROTTLE`, `HIGH_TRAVEL_PERCENT` (default 125), `LAUNCH_UP_PERCENT`, `LAUNCH_CANCEL`, `TRIM_STEP` and `TRIM_LIMIT`.
 
 ## Safety
 
